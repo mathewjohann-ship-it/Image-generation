@@ -62,4 +62,71 @@ def gen_image(prompt: str):
                 ), None
             except Exception as e2:
                 msg = str(e2)
-                
+        
+        if any(x in msg for x in ["402", "Payment Required", "pre-paid credits"]):
+            return None, "❌ Image backend requires credits or model not available on hf-inference.\n\nRaw error: " + msg
+        if "404" in msg or "Not Found" in msg:
+            return None, "❌ Model not served on this provider route (hf-inference).\n\nRaw error: " + msg
+        
+        return None, "Error during image generation: " + msg
+
+def main():
+    st.set_page_config(page_title="Safe AI Image Generator", layout="centered")
+    st.title("🖼️ Safe AI Image Generator")
+    st.info("Flow: Enter a prompt → enhance it → check it using the deployed safety API → generate the image.")
+
+    with st.form("image_form"):
+        raw = st.text_area(
+            "Image Description",
+            height=120,
+            placeholder="Example: A cozy cabin in snowy mountains at sunrise, cinematic lighting",
+        )
+        submit = st.form_submit_button("Generate Image")
+
+    if submit:
+        raw = raw.strip()
+
+        if not raw:
+            st.warning("⚠️ Please enter an image description.")
+            return
+
+        raw_check = check_prompt_with_filter_api(raw)
+        if not raw_check.get("ok"):
+            st.error(f"⚠️ Prompt blocked. {raw_check.get('reason', 'Unsafe prompt')}")
+            return
+
+        with st.spinner("Enhancing your prompt..."):
+            final_prompt = enhance_prompt(raw)
+
+        enhanced_check = check_prompt_with_filter_api(final_prompt)
+        if not enhanced_check.get("ok"):
+            st.error(f"⚠️ Enhanced prompt blocked. {enhanced_check.get('reason', 'Unsafe prompt')}")
+            return
+
+        st.markdown("#### Enhanced Prompt")
+        st.code(final_prompt)
+
+        with st.spinner("Generating image..."):
+            img, err = gen_image(final_prompt)
+
+        if err:
+            st.error(err)
+            return
+
+        st.image(img, caption="Generated Image", use_container_width=True)
+        st.session_state.generated_image = img
+
+    img = st.session_state.get("generated_image")
+    if img:
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        st.download_button(
+            "📥 Download Image",
+            buf.getvalue(),
+            "ai_generated_image.png",
+            "image/png",
+        )
+
+
+if __name__ == "__main__":
+    main()
